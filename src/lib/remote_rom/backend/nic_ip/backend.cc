@@ -29,21 +29,19 @@ namespace Remote_rom {
 	using  Net::Ipv4_packet;
 	using  Net::Mac_address;
 	using  Net::Ipv4_address;
+	using  Net::Size_guard;
 
 	template <class>
 	class  Backend_base;
 	class  Backend_server;
 	class  Backend_client;
 
-	struct Packet_base;
-	struct SignalPacket;
-	struct UpdatePacket;
+	struct Packet;
 	struct DataPacket;
 };
 
 /* Packet format we use for inter-system communication */
-/* FIXME do not inherit from Ethernet_frame and Ipv4_packet but use construct_at_data with size_guard */
-class Remote_rom::Packet_base : public Ethernet_frame, public Ipv4_packet
+class Remote_rom::Packet
 {
 	public:
 		enum {
@@ -53,16 +51,12 @@ class Remote_rom::Packet_base : public Ethernet_frame, public Ipv4_packet
 		typedef enum {
 			SIGNAL    = 1,           /* signal that ROM content has changed     */
 			UPDATE    = 2,           /* request transmission of updated content */
-			DATA      = 3,           /* first data packet                       */
-			DATA_CONT = 4,           /* following data packets                  */
+			DATA      = 3,           /* data packet                             */
 		} Type;
 
-	protected:
+	private:
 		char         _module_name[MAX_NAME_LEN];   /* the ROM module name */
 		Type         _type;                        /* packet type */
-		uint32_t     _content_size;                /* ROM content size in bytes */
-		uint32_t     _offset;                      /* offset in bytes */
-		uint16_t     _payload_size;                /* payload size in bytes */
 
 		/*****************************************************
 		 ** 'payload' must be the last member of this class **
@@ -71,25 +65,60 @@ class Remote_rom::Packet_base : public Ethernet_frame, public Ipv4_packet
 		char payload[0];
 
 	public:
-
-		Packet_base(size_t size) 
-		:
-			Ethernet_frame(),
-			Ipv4_packet(),
-			_payload_size(size)
-		{ }
-
-		void const * base() const { return &payload; }
-
 		/**
 		 * Return type of the packet
 		 */
 		Type type() const { return _type; }
 
 		/**
+		 * Return module_name of the packet
+		 */
+		const char *module_name() { return _module_name; }
+
+		void type(Type type)
+		{
+			_type = type;
+		}
+
+		void module_name(const char *module)
+		{
+			Genode::strncpy(_module_name, module, MAX_NAME_LEN);
+		}
+
+		template <typename T>
+		T const &data(Size_guard &size_guard) const
+		{
+			size_guard.consume_head(sizeof(T));
+			return *(T const *)(payload);
+		}
+
+		template <typename T>
+		T &construct_at_data(Size_guard &size_guard)
+		{
+			size_guard.consume_head(sizeof(T));
+			return *Genode::construct_at<T>(payload);
+		}
+
+} __attribute__((packed));
+
+
+class Remote_rom::DataPacket
+{
+	public:
+		enum { MAX_PAYLOAD_SIZE = 1024 };
+
+	private:
+		uint32_t     _content_size;                /* ROM content size in bytes */
+		uint32_t     _offset;                      /* offset in bytes */
+		uint16_t     _payload_size;                /* payload size in bytes */
+
+		char payload[0];
+
+	public:
+		/**
 		 * Return size of the packet
 		 */
-		size_t size() const { return _payload_size + sizeof(Packet_base); }
+		size_t size() const { return _payload_size + sizeof(*this); }
 
 		/**
 		 * Return content_size of the packet
@@ -101,10 +130,8 @@ class Remote_rom::Packet_base : public Ethernet_frame, public Ipv4_packet
 		 */
 		size_t offset() const { return _offset; }
 
-		/**
-		 * Return module_name of the packet
-		 */
-		char* module_name() { return _module_name; }
+		void content_size(size_t size) { _content_size = size; }
+		void offset(size_t offset) { _offset = offset; }
 
 		/**
 		 * Set payload size of the packet
@@ -112,7 +139,6 @@ class Remote_rom::Packet_base : public Ethernet_frame, public Ipv4_packet
 		void payload_size(Genode::size_t payload_size)
 		{
 			_payload_size = payload_size;
-			Ipv4_packet::total_length(size() - sizeof(Ethernet_frame));
 		}
 
 		/**
@@ -124,92 +150,12 @@ class Remote_rom::Packet_base : public Ethernet_frame, public Ipv4_packet
 		 * Return address of the payload
 		 */
 		void *addr() { return payload; }
-
-		void prepare_ethernet(const Mac_address &src, const Mac_address &dst=Ethernet_frame::broadcast())
-		{
-			Ethernet_frame::src(src);
-			Ethernet_frame::dst(dst);
-			Ethernet_frame::type(Ethernet_frame::Type::IPV4);
-		}
-
-		void prepare_ipv4(const Ipv4_address &src, const Ipv4_address &dst=Ipv4_packet::broadcast())
-		{
-			Ipv4_packet::version(4);
-			Ipv4_packet::header_length(5);
-			Ipv4_packet::time_to_live(10);
-			Ipv4_packet::src(src);
-			Ipv4_packet::dst(dst);
-			Ipv4_packet::total_length(size() - sizeof(Ethernet_frame));
-		}
-
-		void set_checksums()
-		{
-			Ipv4_packet::update_checksum();
-		}
-
-		/**
-		 * Placement new.
-		 */
-		void * operator new(__SIZE_TYPE__ size, void* addr) { return addr; }
-
-} __attribute__((packed));
-
-class Remote_rom::SignalPacket : public Packet_base
-{
-	public:
-		SignalPacket() : Packet_base(0)
-		{ }
-
-		void prepare(const char *module)
-		{
-			Genode::strncpy(_module_name, module, MAX_NAME_LEN);
-			_type = SIGNAL;
-			_payload_size = 0;
-		}
-} __attribute__((packed));
-
-class Remote_rom::UpdatePacket : public Packet_base
-{
-	public:
-		UpdatePacket() : Packet_base(0)
-		{ }
-
-		void prepare(const char *module)
-		{
-			Genode::strncpy(_module_name, module, MAX_NAME_LEN);
-			_type = UPDATE;
-			_payload_size = 0;
-		}
-} __attribute__((packed));
-
-class Remote_rom::DataPacket : public Packet_base
-{
-	public:
-		enum { MAX_PAYLOAD_SIZE = 1024 };
-
-		char payload[MAX_PAYLOAD_SIZE];
-
-		DataPacket() : Packet_base(MAX_PAYLOAD_SIZE)
-		{ }
-
-		void prepare(const char* module, size_t offset, size_t content_size)
-		{
-			Genode::strncpy(_module_name, module, MAX_NAME_LEN);
-
-			_payload_size = MAX_PAYLOAD_SIZE;
-			_offset       = offset;
-			_content_size = content_size;
-
-			if (offset == 0)
-				_type = DATA;
-			else
-				_type = DATA_CONT;
-		}
+		const void *addr() const { return payload; }
 
 		/**
 		 * Return packet size for given payload 
 		 */
-		static size_t packet_size(size_t payload) { return sizeof(Packet_base) + Genode::min(payload, MAX_PAYLOAD_SIZE); }
+		static size_t packet_size(size_t payload) { return sizeof(DataPacket) + Genode::min(payload, MAX_PAYLOAD_SIZE); }
 
 } __attribute__((packed));
 
@@ -240,11 +186,13 @@ class Remote_rom::Backend_base
 						Packet_descriptor _rx_packet = _nic.rx()->get_packet();
 
 						char *content = _nic.rx()->packet_content(_rx_packet);
+						Size_guard edguard(_rx_packet.size());
+						Ethernet_frame &eth = Ethernet_frame::cast_from(content, edguard);
 
 						/* check IP */
-						Ipv4_packet &ip_packet = *(Packet_base*)content;
+						Ipv4_packet &ip_packet = eth.data<Ipv4_packet>(edguard);
 						if (_accept_ip == Ipv4_packet::broadcast() || _accept_ip == ip_packet.dst())
-							_handler.receive(*(Packet_base*)content);
+							_handler.receive(ip_packet.data<Packet>(edguard), edguard);
 
 						_nic.rx()->acknowledge_packet(_rx_packet);
 					}
@@ -302,6 +250,51 @@ class Remote_rom::Backend_base
 				_nic.tx()->release_packet(acked_packet);
 				block = false;
 			}
+		}
+
+		Ipv4_packet &_prepare_upper_layers(void *base, Size_guard &size_guard)
+		{
+			Ethernet_frame &eth = Ethernet_frame::construct_at(base, size_guard);
+			eth.src(_mac_address);
+			eth.dst(Ethernet_frame::broadcast());
+			eth.type(Ethernet_frame::Type::IPV4);
+
+			Ipv4_packet &ip = eth.construct_at_data<Ipv4_packet>(size_guard);
+			ip.version(4);
+			ip.header_length(5);
+			ip.time_to_live(10);
+			ip.src(_src_ip);
+			ip.dst(_dst_ip);
+
+			return ip;
+		}
+
+		size_t _upper_layer_size(size_t size)
+		{
+			return sizeof(Ethernet_frame) + sizeof(Ipv4_packet) + size;
+		}
+
+		void _finish_ipv4(Ipv4_packet &ip, size_t payload)
+		{
+			ip.total_length(sizeof(ip) + payload);
+			ip.update_checksum();
+		}
+
+		template <typename T>
+		void _transmit_notification_packet(Packet::Type type, T *frontend)
+		{
+			size_t frame_size = _upper_layer_size(sizeof(Packet));
+			Nic::Packet_descriptor pd = alloc_tx_packet(frame_size);
+			Size_guard size_guard(pd.size());
+
+			char *content = _nic.tx()->packet_content(pd);
+			Ipv4_packet &ip = _prepare_upper_layers(content, size_guard);
+			Packet &pak = ip.construct_at_data<Packet>(size_guard);
+			pak.type(type);
+			pak.module_name(frontend->module_name());
+			_finish_ipv4(ip, sizeof(Packet));
+
+			submit_tx_packet(pd);
 		}
 
 	public:
@@ -371,19 +364,27 @@ class Remote_rom::Backend_server : public Backend_server_base, public Backend_ba
 			while (offset < size)
 			{
 				/* create and transmit packet via NIC session */
-				Nic::Packet_descriptor pd = alloc_tx_packet(DataPacket::packet_size(size));
-				DataPacket *packet = new (_nic.tx()->packet_content(pd)) DataPacket();
+				size_t max_size = _upper_layer_size(sizeof(Packet)
+				                                    + DataPacket::packet_size(size));
+				Nic::Packet_descriptor pd = alloc_tx_packet(max_size);
+				Size_guard size_guard(pd.size());
 
-				packet->prepare_ethernet(_mac_address, Ethernet_frame::broadcast());
-				packet->prepare_ipv4(_src_ip, _dst_ip);
-				packet->prepare(_forwarder->module_name(), offset, size);
+				char *content = _nic.tx()->packet_content(pd);
+				Ipv4_packet &ip = _prepare_upper_layers(content, size_guard);
+				Packet &pak = ip.construct_at_data<Packet>(size_guard);
+				pak.type(Packet::DATA);
+				pak.module_name(_forwarder->module_name());
 
-				packet->payload_size(_forwarder->transfer_content((char*)packet->addr(), DataPacket::MAX_PAYLOAD_SIZE, offset));
-				packet->set_checksums();
+				DataPacket &data = pak.construct_at_data<DataPacket>(size_guard);
+				data.offset(offset);
+				data.content_size(size);
+
+				data.payload_size(_forwarder->transfer_content((char*)data.addr(), DataPacket::MAX_PAYLOAD_SIZE, offset));
+				_finish_ipv4(ip, sizeof(Packet) + data.size());
 
 				submit_tx_packet(pd);
 
-				offset += packet->payload_size();
+				offset += data.payload_size();
 			}
 		}
 
@@ -399,24 +400,14 @@ class Remote_rom::Backend_server : public Backend_server_base, public Backend_ba
 		void send_update()
 		{
 			if (!_forwarder) return;
-
-			/* create and transmit packet via NIC session */
-			Nic::Packet_descriptor pd = alloc_tx_packet(sizeof(SignalPacket));
-			SignalPacket *packet = new (_nic.tx()->packet_content(pd)) SignalPacket();
-
-			packet->prepare_ethernet(_mac_address);
-			packet->prepare_ipv4(_src_ip, _dst_ip);
-			packet->prepare(_forwarder->module_name());
-			packet->set_checksums();
-
-			submit_tx_packet(pd);
+			_transmit_notification_packet(Packet::SIGNAL, _forwarder);
 		}
 
-		void receive(Packet_base &packet)
+		void receive(Packet &packet, Size_guard &size_guard)
 		{
 			switch (packet.type())
 			{
-				case Packet_base::UPDATE:
+				case Packet::UPDATE:
 					if (verbose)
 						Genode::log("receiving UPDATE (", Cstring(packet.module_name()), ") packet");
 
@@ -445,9 +436,10 @@ class Remote_rom::Backend_client : public Backend_client_base, public Backend_ba
 		size_t                     _buf_size;
 
 
-		void write(char *data, size_t offset, size_t size)
+		void write(const void *data, size_t offset, size_t size)
 		{
 			if (!_write_ptr) return;
+
 
 			size_t const len = Genode::min(size, _buf_size-offset);
 			Genode::memcpy(_write_ptr+offset, data, len);
@@ -480,23 +472,14 @@ class Remote_rom::Backend_client : public Backend_client_base, public Backend_ba
 			if (Genode::strcmp(module_name, _receiver->module_name()))
 				return;
 
-			/* create and transmit packet via NIC session */
-			Nic::Packet_descriptor pd = alloc_tx_packet(sizeof(UpdatePacket));
-			UpdatePacket *packet = (UpdatePacket*)_nic.tx()->packet_content(pd);
-
-			packet->prepare_ethernet(_mac_address);
-			packet->prepare_ipv4(_src_ip, _dst_ip);
-			packet->prepare(_receiver->module_name());
-			packet->set_checksums();
-
-			submit_tx_packet(pd);
+			_transmit_notification_packet(Packet::UPDATE, _receiver);
 		}
 
-		void receive(Packet_base &packet)
+		void receive(Packet &packet, Size_guard &size_guard)
 		{
 			switch (packet.type())
 			{
-				case Packet_base::SIGNAL:
+				case Packet::SIGNAL:
 					if (verbose)
 						Genode::log("receiving SIGNAL(", Cstring(packet.module_name()), ") packet");
 
@@ -504,37 +487,30 @@ class Remote_rom::Backend_client : public Backend_client_base, public Backend_ba
 					update(packet.module_name());
 					
 					break;
-				case Packet_base::DATA:
-					if (verbose)
-						Genode::log("receiving DATA(", Cstring(packet.module_name()), ") packet");
+				case Packet::DATA:
+					{
+						if (verbose)
+							Genode::log("receiving DATA(", Cstring(packet.module_name()), ") packet");
 
-					/* write into buffer */
-					if (!_receiver) return;
+						/* write into buffer */
+						if (!_receiver) return;
 
-					/* check module name */
-					if (Genode::strcmp(packet.module_name(), _receiver->module_name()))
-						return;
-					
-					_write_ptr = _receiver->start_new_content(packet.content_size());
-					_buf_size  = (_write_ptr) ? packet.content_size() : 0;
+						/* check module name */
+						if (Genode::strcmp(packet.module_name(), _receiver->module_name()))
+							return;
 
-					write((char*)packet.addr(), packet.offset(), packet.payload_size());
-					
-					break;
-				case Packet_base::DATA_CONT:
-					if (verbose)
-						Genode::log("receiving DATA_CONT(", Cstring(packet.module_name()), ") packet");
+						const DataPacket &data = packet.data<DataPacket>(size_guard);
+						size_guard.consume_head(data.payload_size());
 
-					if (!_receiver) return;
+						if (!data.offset()) {
+							_write_ptr = _receiver->start_new_content(data.content_size());
+							_buf_size  = (_write_ptr) ? data.content_size() : 0;
+						}
 
-					/* check module name */
-					if (Genode::strcmp(packet.module_name(), _receiver->module_name()))
-						return;
+						write(data.addr(), data.offset(), data.payload_size());
 
-					/* write into buffer */
-					write((char*)packet.addr(), packet.offset(), packet.payload_size());
-					
-					break;
+						break;
+					}
 				default:
 					break;
 			}
