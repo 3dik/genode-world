@@ -155,7 +155,9 @@ class Remote_rom::DataPacket
 		/**
 		 * Return packet size for given payload 
 		 */
-		static size_t packet_size(size_t payload) { return sizeof(DataPacket) + Genode::min(payload, MAX_PAYLOAD_SIZE); }
+		static size_t packet_size(size_t payload) {
+			return sizeof(DataPacket) + Genode::min(payload, MAX_PAYLOAD_SIZE);
+		}
 
 } __attribute__((packed));
 
@@ -191,7 +193,8 @@ class Remote_rom::Backend_base
 
 						/* check IP */
 						Ipv4_packet &ip_packet = eth.data<Ipv4_packet>(edguard);
-						if (_accept_ip == Ipv4_packet::broadcast() || _accept_ip == ip_packet.dst())
+						if (_accept_ip == Ipv4_packet::broadcast()
+						    || _accept_ip == ip_packet.dst())
 							_handler.receive(ip_packet.data<Packet>(edguard), edguard);
 
 						_nic.rx()->acknowledge_packet(_rx_packet);
@@ -210,9 +213,12 @@ class Remote_rom::Backend_base
 				: Genode::Thread(Weight::DEFAULT_WEIGHT, "backend_nic_rx", 8192),
 				  _accept_ip(ip),
 				  _nic(nic), _handler(handler),
-				  _link_state_dispatcher(_sig_rec, *this, &Rx_thread::_handle_link_state),
-				  _rx_packet_avail_dispatcher(_sig_rec, *this, &Rx_thread::_handle_rx_packet_avail),
-				  _rx_ready_to_ack_dispatcher(_sig_rec, *this, &Rx_thread::_handle_rx_ready_to_ack)
+				  _link_state_dispatcher(_sig_rec, *this,
+				                         &Rx_thread::_handle_link_state),
+				  _rx_packet_avail_dispatcher(_sig_rec, *this,
+				                              &Rx_thread::_handle_rx_packet_avail),
+				  _rx_ready_to_ack_dispatcher(_sig_rec, *this,
+				                              &Rx_thread::_handle_rx_ready_to_ack)
 				{
 					_nic.link_state_sigh(_link_state_dispatcher);
 					_nic.rx_channel()->sigh_packet_avail(_rx_packet_avail_dispatcher);
@@ -221,14 +227,15 @@ class Remote_rom::Backend_base
 
 				void entry()
 				{
+					using Genode::Signal_dispatcher_base;
+
 					while(true)
 					{
 						Genode::Signal sig = _sig_rec.wait_for_signal();
-						int num    = sig.num();
 
 						Genode::Signal_dispatcher_base *dispatcher;
-						dispatcher = dynamic_cast<Genode::Signal_dispatcher_base *>(sig.context());
-						dispatcher->dispatch(num);
+						dispatcher = dynamic_cast<Signal_dispatcher_base *>(sig.context());
+						dispatcher->dispatch(sig.num());
 					}
 				}
 		};
@@ -298,7 +305,8 @@ class Remote_rom::Backend_base
 		}
 
 	public:
-		explicit Backend_base(Genode::Env &env, Genode::Allocator &alloc, HANDLER &handler)
+		explicit Backend_base(Genode::Env &env, Genode::Allocator &alloc,
+		                      HANDLER &handler)
 		:
 			_tx_block_alloc(&alloc), _nic(env, &_tx_block_alloc, BUF_SIZE, BUF_SIZE),
 			_rx_thread(_nic, handler, _accept_ip)
@@ -350,7 +358,9 @@ class Remote_rom::Backend_base
 		}
 };
 
-class Remote_rom::Backend_server : public Backend_server_base, public Backend_base<Backend_server>
+class Remote_rom::Backend_server :
+  public Backend_server_base,
+  public Backend_base<Backend_server>
 {
 	private:
 		Rom_forwarder_base         *_forwarder;
@@ -379,7 +389,10 @@ class Remote_rom::Backend_server : public Backend_server_base, public Backend_ba
 				data.offset(offset);
 				data.content_size(size);
 
-				data.payload_size(_forwarder->transfer_content((char*)data.addr(), DataPacket::MAX_PAYLOAD_SIZE, offset));
+				const size_t max = DataPacket::MAX_PAYLOAD_SIZE;
+				data.payload_size(_forwarder->transfer_content((char*)data.addr(),
+				                                               max,
+				                                               offset));
 				_finish_ipv4(ip, sizeof(Packet) + data.size());
 
 				submit_tx_packet(pd);
@@ -389,7 +402,9 @@ class Remote_rom::Backend_server : public Backend_server_base, public Backend_ba
 		}
 
 	public:
-		Backend_server(Genode::Env &env, Genode::Allocator &alloc) : Backend_base(env, alloc, *this), _forwarder(nullptr)
+		Backend_server(Genode::Env &env, Genode::Allocator &alloc) :
+		  Backend_base(env, alloc, *this),
+		  _forwarder(nullptr)
 		{	}
 
 		void register_forwarder(Rom_forwarder_base *forwarder)
@@ -409,7 +424,9 @@ class Remote_rom::Backend_server : public Backend_server_base, public Backend_ba
 			{
 				case Packet::UPDATE:
 					if (verbose)
-						Genode::log("receiving UPDATE (", Cstring(packet.module_name()), ") packet");
+						Genode::log("receiving UPDATE (",
+						            Cstring(packet.module_name()),
+						            ") packet");
 
 					if (!_forwarder)
 						return;
@@ -428,7 +445,9 @@ class Remote_rom::Backend_server : public Backend_server_base, public Backend_ba
 		}
 };
 
-class Remote_rom::Backend_client : public Backend_client_base, public Backend_base<Backend_client>
+class Remote_rom::Backend_client :
+  public Backend_client_base,
+  public Backend_base<Backend_client>
 {
 	private:
 		Rom_receiver_base          *_receiver;
@@ -449,16 +468,21 @@ class Remote_rom::Backend_client : public Backend_client_base, public Backend_ba
 		}
 
 	public:
-		Backend_client(Genode::Env &env, Genode::Allocator &alloc) : Backend_base(env, alloc, *this), _receiver(nullptr), _write_ptr(nullptr), _buf_size(0)
-		{
-		}
+		Backend_client(Genode::Env &env, Genode::Allocator &alloc) :
+		  Backend_base(env, alloc, *this),
+		  _receiver(nullptr), _write_ptr(nullptr),
+		  _buf_size(0)
+		{ }
 
 		void register_receiver(Rom_receiver_base *receiver)
 		{
 			/* TODO support multiple receivers (ROM names) */
 			_receiver = receiver;
 
-			/* FIXME request update on startup (occasionally triggers invalid signal-context capability) */
+			/*
+			 * FIXME request update on startup
+			 * (occasionally triggers invalid signal-context capability)
+			 * */
 //			if (_receiver)
 //				update(_receiver->module_name());
 		}
@@ -481,7 +505,9 @@ class Remote_rom::Backend_client : public Backend_client_base, public Backend_ba
 			{
 				case Packet::SIGNAL:
 					if (verbose)
-						Genode::log("receiving SIGNAL(", Cstring(packet.module_name()), ") packet");
+						Genode::log("receiving SIGNAL(",
+						            Cstring(packet.module_name()),
+						            ") packet");
 
 					/* send update request */
 					update(packet.module_name());
@@ -490,7 +516,9 @@ class Remote_rom::Backend_client : public Backend_client_base, public Backend_ba
 				case Packet::DATA:
 					{
 						if (verbose)
-							Genode::log("receiving DATA(", Cstring(packet.module_name()), ") packet");
+							Genode::log("receiving DATA(",
+							            Cstring(packet.module_name()),
+							            ") packet");
 
 						/* write into buffer */
 						if (!_receiver) return;
@@ -517,14 +545,20 @@ class Remote_rom::Backend_client : public Backend_client_base, public Backend_ba
 		}
 };
 
-Remote_rom::Backend_server_base &Remote_rom::backend_init_server(Genode::Env &env, Genode::Allocator &alloc)
-{
-	static Backend_server backend(env, alloc);
-	return backend;
-}
+namespace Remote_rom {
+	using Genode::Env;
+	using Genode::Allocator;
 
-Remote_rom::Backend_client_base &Remote_rom::backend_init_client(Genode::Env &env, Genode::Allocator &alloc)
-{
-	static Backend_client backend(env, alloc);
-	return backend;
-}
+	Backend_server_base &backend_init_server(Env &env, Allocator &alloc)
+	{
+		static Backend_server backend(env, alloc);
+		return backend;
+	}
+
+	Backend_client_base &backend_init_client(Env &env, Allocator &alloc)
+	{
+		static Backend_client backend(env, alloc);
+		return backend;
+	}
+};
+
