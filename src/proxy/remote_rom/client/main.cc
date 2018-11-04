@@ -44,7 +44,8 @@ namespace Remote_rom {
 	struct Main;
 	struct Read_buffer;
 
-	typedef Genode::List<Session_component> Session_list;
+	typedef Genode::List_element<Session_component> Session_element;
+	typedef Genode::List<Session_element>           Session_list;
 };
 
 
@@ -52,15 +53,14 @@ namespace Remote_rom {
  * Interface used by the sessions to obtain the ROM data received from the
  * remote server
  */
-struct Remote_rom::Read_buffer
+struct Remote_rom::Read_buffer : Genode::Interface
 {
 	virtual size_t content_size() const = 0;
 	virtual size_t export_content(char *dst, size_t dst_len) const = 0;
 };
 
 class Remote_rom::Session_component :
-  public Genode::Rpc_object<Genode::Rom_session, Session_component>,
-  public Session_list::Element
+  public Genode::Rpc_object<Genode::Rom_session, Session_component>
 {
 	private:
 		Genode::Env &_env;
@@ -70,6 +70,7 @@ class Remote_rom::Session_component :
 		Read_buffer const &_buffer;
 
 		Session_list &_sessions;
+		Session_element _element;
 
 		Constructible<Genode::Attached_ram_dataspace> _ram_ds;
 
@@ -80,12 +81,13 @@ class Remote_rom::Session_component :
 		Session_component(Genode::Env &env, Session_list &sessions,
 		                  Read_buffer const &buffer)
 		:
-		  _env(env), _buffer(buffer), _sessions(sessions)
+		  _env(env), _sigh(), _buffer(buffer), _sessions(sessions), _element(this),
+		  _ram_ds()
 		{
-			_sessions.insert(this);
+			_sessions.insert(&_element);
 		}
 
-		~Session_component() { _sessions.remove(this); }
+		~Session_component() { _sessions.remove(&_element); }
 
 		void notify_client()
 		{
@@ -139,7 +141,7 @@ class Remote_rom::Root : public Genode::Root_component<Session_component>
 
 	protected:
 
-		Session_component *_create_session(const char *args)
+		Session_component *_create_session(const char *)
 		{
 			using namespace Genode;
 
@@ -157,13 +159,14 @@ class Remote_rom::Root : public Genode::Root_component<Session_component>
 		:
 		  Genode::Root_component<Session_component>(&env.ep().rpc_ep(), &md_alloc),
 		  _env(env),
-		  _buffer(buffer)
+		  _buffer(buffer),
+		  _sessions()
 		{ }
 
 		void notify_clients()
 		{
-			for (Session_component *s = _sessions.first(); s; s = s->next())
-				s->notify_client();
+			for (Session_element *s = _sessions.first(); s; s = s->next())
+				s->object()->notify_client();
 		}
 };
 
@@ -183,7 +186,8 @@ struct Remote_rom::Main : public Read_buffer, public Rom_receiver_base
 	char remotename[255];
 
 	Main(Genode::Env &env) :
-	  env(env), _ds_content_size(1024), _backend(backend_init_client(env, heap))
+	  env(env), _ds(), _ds_content_size(1024),
+	  _backend(backend_init_client(env, heap))
 	{
 		try {
 			Genode::Xml_node remote_rom = _config.xml().sub_node("remote_rom");

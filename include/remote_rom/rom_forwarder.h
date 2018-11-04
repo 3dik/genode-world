@@ -21,7 +21,7 @@ namespace Remote_rom {
 	struct Rom_forwarder_base;
 }
 
-struct Remote_rom::Rom_forwarder_base
+struct Remote_rom::Rom_forwarder_base : Genode::Interface
 {
 	virtual const char *module_name() const = 0;
 	virtual size_t content_size() const = 0;

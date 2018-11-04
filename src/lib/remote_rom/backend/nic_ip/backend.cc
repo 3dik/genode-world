@@ -105,7 +105,7 @@ class Remote_rom::Packet
 class Remote_rom::DataPacket
 {
 	public:
-		enum { MAX_PAYLOAD_SIZE = 1024 };
+		static const size_t MAX_PAYLOAD_SIZE = 1024;
 
 	private:
 		uint32_t     _content_size;                /* ROM content size in bytes */
@@ -162,7 +162,7 @@ class Remote_rom::DataPacket
 } __attribute__((packed));
 
 template <class HANDLER>
-class Remote_rom::Backend_base
+class Remote_rom::Backend_base : public Genode::Interface
 {
 	protected:
 		enum {
@@ -213,6 +213,7 @@ class Remote_rom::Backend_base
 				: Genode::Thread(Weight::DEFAULT_WEIGHT, "backend_nic_rx", 8192),
 				  _accept_ip(ip),
 				  _nic(nic), _handler(handler),
+				  _sig_rec(),
 				  _link_state_dispatcher(_sig_rec, *this,
 				                         &Rx_thread::_handle_link_state),
 				  _rx_packet_avail_dispatcher(_sig_rec, *this,
@@ -309,13 +310,14 @@ class Remote_rom::Backend_base
 		                      HANDLER &handler)
 		:
 			_tx_block_alloc(&alloc), _nic(env, &_tx_block_alloc, BUF_SIZE, BUF_SIZE),
-			_rx_thread(_nic, handler, _accept_ip)
+			_rx_thread(_nic, handler, _accept_ip),
+			_mac_address(_nic.mac_address()),
+			_src_ip(Ipv4_packet::current()),
+			_accept_ip(Ipv4_packet::broadcast()),
+			_dst_ip(Ipv4_packet::broadcast())
 		{
 			/* start dispatcher thread */
 			_rx_thread.start();
-
-			/* store mac address */
-			_mac_address = _nic.mac_address();
 
 			Genode::Attached_rom_dataspace config = {env, "config"};
 
@@ -331,9 +333,6 @@ class Remote_rom::Backend_base
 				_accept_ip = _src_ip;
 			} catch (...) {
 				Genode::warning("No IP configured, falling back to broadcast mode!");
-				_src_ip = Ipv4_packet::current();
-				_dst_ip = Ipv4_packet::broadcast();
-				_accept_ip = Ipv4_packet::broadcast();
 			}
 		}
 
@@ -364,6 +363,9 @@ class Remote_rom::Backend_server :
 {
 	private:
 		Rom_forwarder_base         *_forwarder;
+
+		Backend_server(Backend_server &);
+		Backend_server &operator= (Backend_server &);
 
 		void send_data()
 		{
@@ -418,7 +420,7 @@ class Remote_rom::Backend_server :
 			_transmit_notification_packet(Packet::SIGNAL, _forwarder);
 		}
 
-		void receive(Packet &packet, Size_guard &size_guard)
+		void receive(Packet &packet, Size_guard &)
 		{
 			switch (packet.type())
 			{
@@ -454,6 +456,8 @@ class Remote_rom::Backend_client :
 		char                       *_write_ptr;
 		size_t                     _buf_size;
 
+		Backend_client(Backend_client &);
+		Backend_client &operator= (Backend_client &);
 
 		void write(const void *data, size_t offset, size_t size)
 		{

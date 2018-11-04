@@ -21,7 +21,7 @@ namespace Remote_rom {
 	struct Rom_receiver_base;
 }
 
-struct Remote_rom::Rom_receiver_base
+struct Remote_rom::Rom_receiver_base : Genode::Interface
 {
 	virtual const char *module_name() const = 0;
 	virtual char* start_new_content(size_t len) = 0;

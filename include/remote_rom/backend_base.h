@@ -28,13 +28,13 @@ namespace Remote_rom {
 	                                         Genode::Allocator &alloc);
 };
 
-struct Remote_rom::Backend_server_base
+struct Remote_rom::Backend_server_base : Genode::Interface
 {
 	virtual void send_update() = 0;
 	virtual void register_forwarder(Rom_forwarder_base *forwarder) = 0;
 };
 
-struct Remote_rom::Backend_client_base
+struct Remote_rom::Backend_client_base : Genode::Interface
 {
 	virtual void register_receiver(Rom_receiver_base *receiver) = 0;
 };
