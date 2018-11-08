@@ -45,19 +45,18 @@ class Remote_rom::Backend_base : public Genode::Interface
 			BUF_SIZE = Nic::Session::QUEUE_SIZE * PACKET_SIZE
 		};
 
-		class Rx_thread : public Genode::Thread
+		class Rx
 		{
 			protected:
 				Ipv4_address    &_accept_ip;
 				Nic::Connection &_nic;
 				HANDLER         &_handler;
 
-				Genode::Signal_receiver              _sig_rec;
-				Genode::Signal_dispatcher<Rx_thread> _link_state_dispatcher;
-				Genode::Signal_dispatcher<Rx_thread> _rx_packet_avail_dispatcher;
-				Genode::Signal_dispatcher<Rx_thread> _rx_ready_to_ack_dispatcher;
+				Genode::Signal_handler<Rx> _link_state_handler;
+				Genode::Signal_handler<Rx> _rx_packet_avail_handler;
+				Genode::Signal_handler<Rx> _rx_ready_to_ack_handler;
 
-				void _handle_rx_packet_avail(unsigned)
+				void _handle_rx_packet_avail()
 				{
 					while (_nic.rx()->packet_avail() && _nic.rx()->ready_to_ack()) {
 						Packet_descriptor _rx_packet = _nic.rx()->get_packet();
@@ -76,50 +75,33 @@ class Remote_rom::Backend_base : public Genode::Interface
 					}
 				}
 
-				void _handle_rx_ready_to_ack(unsigned) { _handle_rx_packet_avail(0); }
+				void _handle_rx_ready_to_ack() { _handle_rx_packet_avail(); }
 
-				void _handle_link_state(unsigned)
+				void _handle_link_state()
 				{
 					Genode::log("link state changed");
 				}
 
 			public:
-				Rx_thread(Nic::Connection &nic, HANDLER &handler, Ipv4_address &ip)
-				: Genode::Thread(Weight::DEFAULT_WEIGHT, "backend_nic_rx", 8192),
+				Rx(Genode::Entrypoint &ep, Nic::Connection &nic,
+				   HANDLER &handler, Ipv4_address &ip)
+				:
 				  _accept_ip(ip),
 				  _nic(nic), _handler(handler),
-				  _sig_rec(),
-				  _link_state_dispatcher(_sig_rec, *this,
-				                         &Rx_thread::_handle_link_state),
-				  _rx_packet_avail_dispatcher(_sig_rec, *this,
-				                              &Rx_thread::_handle_rx_packet_avail),
-				  _rx_ready_to_ack_dispatcher(_sig_rec, *this,
-				                              &Rx_thread::_handle_rx_ready_to_ack)
+				  _link_state_handler(ep, *this, &Rx::_handle_link_state),
+				  _rx_packet_avail_handler(ep, *this, &Rx::_handle_rx_packet_avail),
+				  _rx_ready_to_ack_handler(ep, *this, &Rx::_handle_rx_ready_to_ack)
 				{
-					_nic.link_state_sigh(_link_state_dispatcher);
-					_nic.rx_channel()->sigh_packet_avail(_rx_packet_avail_dispatcher);
-					_nic.rx_channel()->sigh_ready_to_ack(_rx_ready_to_ack_dispatcher);
-				}
-
-				void entry()
-				{
-					using Genode::Signal_dispatcher_base;
-
-					while(true)
-					{
-						Genode::Signal sig = _sig_rec.wait_for_signal();
-
-						Genode::Signal_dispatcher_base *dispatcher;
-						dispatcher = dynamic_cast<Signal_dispatcher_base *>(sig.context());
-						dispatcher->dispatch(sig.num());
-					}
+					_nic.link_state_sigh(_link_state_handler);
+					_nic.rx_channel()->sigh_packet_avail(_rx_packet_avail_handler);
+					_nic.rx_channel()->sigh_ready_to_ack(_rx_ready_to_ack_handler);
 				}
 		};
 
 		const bool            _verbose = false;
 		Nic::Packet_allocator _tx_block_alloc;
 		Nic::Connection       _nic;
-		Rx_thread             _rx_thread;
+		Rx                    _rx;
 		Mac_address           _mac_address;
 		Ipv4_address          _src_ip;
 		Ipv4_address          _accept_ip;
@@ -187,15 +169,12 @@ class Remote_rom::Backend_base : public Genode::Interface
 		                      HANDLER &handler)
 		:
 			_tx_block_alloc(&alloc), _nic(env, &_tx_block_alloc, BUF_SIZE, BUF_SIZE),
-			_rx_thread(_nic, handler, _accept_ip),
+			_rx(env.ep(), _nic, handler, _accept_ip),
 			_mac_address(_nic.mac_address()),
 			_src_ip(Ipv4_packet::current()),
 			_accept_ip(Ipv4_packet::broadcast()),
 			_dst_ip(Ipv4_packet::broadcast())
 		{
-			/* start dispatcher thread */
-			_rx_thread.start();
-
 			Genode::Attached_rom_dataspace config = {env, "config"};
 
 			try {

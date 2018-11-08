@@ -90,7 +90,6 @@ class Remote_rom::Backend_server :
 					if (Genode::strcmp(packet.module_name(), _forwarder->module_name()))
 						return;
 
-					/* TODO (optional) dont send data within Rx_Thread's context */
 					send_data();
 
 					break;
