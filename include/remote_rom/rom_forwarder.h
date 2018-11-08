@@ -15,6 +15,7 @@
 #define __INCLUDE__REMOTE_ROM__ROM_FORWARDER_H_
 
 #include <base/stdint.h>
+#include <util/interface.h>
 
 namespace Remote_rom {
 	using Genode::size_t;

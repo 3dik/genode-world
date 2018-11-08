@@ -14,6 +14,8 @@
 #ifndef __INCLUDE__REMOTE_ROM__BACKEND_BASE_H_
 #define __INCLUDE__REMOTE_ROM__BACKEND_BASE_H_
 
+#include <base/env.h>
+
 #include <rom_forwarder.h>
 #include <rom_receiver.h>
 

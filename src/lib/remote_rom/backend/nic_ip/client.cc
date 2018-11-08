@@ -4,17 +4,21 @@
  * \date   2018-11-06
  */
 
+#include <backend_base.h>
 #include <base.h>
 
 namespace Remote_rom {
+	using  Genode::Cstring;
+
 	struct Backend_client;
 };
 
 class Remote_rom::Backend_client :
   public Backend_client_base,
-  public Backend_base<Backend_client>
+  public Backend_base
 {
 	private:
+
 		Rom_receiver_base          *_receiver;
 		char                       *_write_ptr;
 		size_t                     _buf_size;
@@ -34,26 +38,6 @@ class Remote_rom::Backend_client :
 				_receiver->commit_new_content();
 		}
 
-	public:
-		Backend_client(Genode::Env &env, Genode::Allocator &alloc) :
-		  Backend_base(env, alloc, *this),
-		  _receiver(nullptr), _write_ptr(nullptr),
-		  _buf_size(0)
-		{ }
-
-		void register_receiver(Rom_receiver_base *receiver)
-		{
-			/* TODO support multiple receivers (ROM names) */
-			_receiver = receiver;
-
-			/*
-			 * FIXME request update on startup
-			 * (occasionally triggers invalid signal-context capability)
-			 * */
-//			if (_receiver)
-//				update(_receiver->module_name());
-		}
-
 
 		void update(const char* module_name)
 		{
@@ -65,6 +49,7 @@ class Remote_rom::Backend_client :
 
 			_transmit_notification_packet(Packet::UPDATE, _receiver);
 		}
+
 
 		void receive(Packet &packet, Size_guard &size_guard)
 		{
@@ -109,6 +94,28 @@ class Remote_rom::Backend_client :
 				default:
 					break;
 			}
+		}
+
+	public:
+
+		Backend_client(Genode::Env &env, Genode::Allocator &alloc) :
+		  Backend_base(env, alloc),
+		  _receiver(nullptr), _write_ptr(nullptr),
+		  _buf_size(0)
+		{ }
+
+
+		void register_receiver(Rom_receiver_base *receiver)
+		{
+			/* TODO support multiple receivers (ROM names) */
+			_receiver = receiver;
+
+			/*
+			 * FIXME request update on startup
+			 * (occasionally triggers invalid signal-context capability)
+			 * */
+//			if (_receiver)
+//				update(_receiver->module_name());
 		}
 };
 

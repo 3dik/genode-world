@@ -4,17 +4,21 @@
  * \date   2018-11-06
  */
 
+#include <backend_base.h>
 #include <base.h>
 
 namespace Remote_rom {
+	using  Genode::Cstring;
+
 	struct Backend_server;
 };
 
 class Remote_rom::Backend_server :
   public Backend_server_base,
-  public Backend_base<Backend_server>
+  public Backend_base
 {
 	private:
+
 		Rom_forwarder_base         *_forwarder;
 
 		Backend_server(Backend_server &);
@@ -56,22 +60,6 @@ class Remote_rom::Backend_server :
 			}
 		}
 
-	public:
-		Backend_server(Genode::Env &env, Genode::Allocator &alloc) :
-		  Backend_base(env, alloc, *this),
-		  _forwarder(nullptr)
-		{	}
-
-		void register_forwarder(Rom_forwarder_base *forwarder)
-		{
-			_forwarder = forwarder;
-		}
-
-		void send_update()
-		{
-			if (!_forwarder) return;
-			_transmit_notification_packet(Packet::SIGNAL, _forwarder);
-		}
 
 		void receive(Packet &packet, Size_guard &)
 		{
@@ -96,6 +84,26 @@ class Remote_rom::Backend_server :
 				default:
 					break;
 			}
+		}
+
+	public:
+
+		Backend_server(Genode::Env &env, Genode::Allocator &alloc) :
+		  Backend_base(env, alloc),
+		  _forwarder(nullptr)
+		{	}
+
+
+		void register_forwarder(Rom_forwarder_base *forwarder)
+		{
+			_forwarder = forwarder;
+		}
+
+
+		void send_update()
+		{
+			if (!_forwarder) return;
+			_transmit_notification_packet(Packet::SIGNAL, _forwarder);
 		}
 };
 
